@@ -1,3 +1,6 @@
+import sys        
+sys.path.append('../')
+
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
@@ -23,53 +26,9 @@ import argparse
 import csv
 from sklearn.decomposition import PCA
 
-mapped_subcat = {0:"manual mode (0)",
-				1:"altitude control mode (1)",
-				2:"position control mode (2)",
-				3:"mission mode (3)",
-				4:"loiter mode (4)",
-				5:"return to launch mode (5)",
-				6:"RC recovery (6)",
-				8:"free slot (8)",
-				9:"free slot (9)",
-				10:"acro mode (10)",
-				11:"free slot (11)",
-				12:"descend mode (no position control) (12)",
-				13:"termination mode (13)",
-				14:"offboard (14)",
-				15:"stabilized mode (15)",
-				16:"rattitude (16)",
-				17:"takeoff (17)",
-				18:"land (18)",
-				19:"follow (19)",
-				20:"precision land with landing target (20)",
-				21:"orbit in circle (21)",
-				22:"takeoff, transition, establish loiter (22)"}
-
-mapped_cat = {"RC recovery (6)":"auto",
-				"manual mode (0)":"manual",
-				"altitude control mode (1)":"guided",
-				"position control mode (2)":"guided",
-				"mission mode (3)":"auto",
-				"loiter mode (4)":"auto",
-				"return to launch mode (5)":"auto",
-				"free slot (8)":"undefined",
-				"free slot (9)":"undefined",
-				"acro mode (10)":"guided",
-				"free slot (11)":"undefined",
-				"descend mode (no position control) (12)":"auto",
-				"termination mode (13)":"auto",
-				"offboard (14)": "auto",
-				"stabilized mode (15)":"guided",
-				"rattitude (16)":"guided",
-				"takeoff (17)":"auto",
-				"land (18)":"auto",
-				"follow (19)":"auto",
-				"precision land with landing target (20)":"auto",
-				"orbit in circle (21)":"guided",
-					"takeoff, transition, establish loiter (22)":"auto"}
-
-mapped_label = {"guided":0, "auto":1, "manual":2}            
+import utils
+import flight_mode_preprocess as fmp
+import flight_mode_models as fmm
 
 # 32 
 # twoD_mean = (0.9791, 0.9873, 0.9930)
@@ -93,18 +52,6 @@ mean_std_map = {"2D": {"mean": [0.9791, 0.9874, 0.9930], "stdev": [0.0810, 0.049
 # twoDT_stdev = [0.0799, 0.0492, 0.0243]
 
 shape = 64
-
-def micros_to_secs(micros):
-	return micros/1e6
-
-def secs_to_micros(secs):
-	return secs*1e6
-
-
-def to_category(y):
-	new_y = [mapped_label[mapped_cat[mapped_subcat[i]]] for i in y]
-
-	return new_y
 
 
 class CNN(nn.Module):
@@ -233,11 +180,11 @@ def create_other_class(X, y, mapping, classes, n_samples=500, drop_other=False):
 	new_counts = list(Counter(new_y))
 
 	if not drop_other:
-		new_classes = [mapped_subcat[mapping[i]] for i in range(len(new_counts) - 1)]
+		new_classes = [utils.mapped_subcat[mapping[i]] for i in range(len(new_counts) - 1)]
 		new_classes.append("other")
 		return new_X, new_y, new_classes, []
 
-	new_classes = [mapped_subcat[mapping[i]] for i in range(len(new_counts))]
+	new_classes = [utils.mapped_subcat[mapping[i]] for i in range(len(new_counts))]
 
 
 	return new_X, new_y, new_classes, kept_indices
@@ -281,11 +228,11 @@ def get_raw_data(img_dir, y, mapping, target="cat", small_subset=False):
 
 	if target == "cat":
 		cat_test_y = to_category(mapping[i] for i in y)
-		reversed_mapping = {value:key for key, value in mapped_label.items()}
+		reversed_mapping = {value:key for key, value in utils.mapped_label.items()}
 		classes = [reversed_mapping[i] for i in list(Counter(cat_test_y).keys())]
 		y = cat_test_y
 	elif target == "subcat":
-		classes = [mapped_subcat[mapping[i]] for i in range(len(mapping))]
+		classes = [utils.mapped_subcat[mapping[i]] for i in range(len(mapping))]
 		X, y, classes, _ =  create_other_class(X, y, mapping, classes)
 
 
@@ -302,11 +249,11 @@ def get_raw_data3D(img_dir, y, mapping, target):
 
 	if target == "cat":
 		cat_test_y = to_category(mapping[i] for i in y)
-		reversed_mapping = {value:key for key, value in mapped_label.items()}
+		reversed_mapping = {value:key for key, value in utils.mapped_label.items()}
 		classes = [reversed_mapping[i] for i in list(Counter(cat_test_y).keys())]
 		y = cat_test_y
 	elif target == "subcat":
-		classes = [mapped_subcat[mapping[i]] for i in range(len(mapping))]
+		classes = [utils.mapped_subcat[mapping[i]] for i in range(len(mapping))]
 		X, y, classes, _ =  create_other_class(X, y, mapping, classes)
 
 	return X, y, classes
@@ -373,52 +320,6 @@ def get_mean_and_std(data_loader, image_type):
 	print(std)
 	return mean, std
 
-def write_averages(file_name, results, stacks, n_folds, classes):
-	means = np.mean(stacks["report_stack"], axis=0)
-	stds = np.std(stacks["report_stack"], axis=0)
-	macro_mean = np.mean(stacks["macro_f1_stack"])
-	macro_std = np.std(stacks["macro_f1_stack"])
-	conf_mean = stacks["conf_mat_stack"]/n_folds
-
-	if file_name:
-
-		with open(file_name, 'a', newline='') as csvfile:
-			csv_writer = csv.writer(csvfile)
-			csv_writer.writerow(["\n"]) 
-			csv_writer.writerow(["Averages"])           
-			csv_writer.writerow([""] + [c for c in classes])
-			csv_writer.writerow(["Precision"] + [round(means[0][i], 4) for i in range(len(classes))])
-			csv_writer.writerow(["Recall"] + [round(means[1][i], 4) for i in range(len(classes))])
-			csv_writer.writerow(["F-score"] + [round(means[2][i], 4) for i in range(len(classes))])
-			csv_writer.writerow(["Macro F1 Score", round(macro_mean, 4)])
-
-			csv_writer.writerow(["\n"]) 
-			csv_writer.writerow(["Standard Deviations"])           
-			csv_writer.writerow([""] + [c for c in classes])
-			csv_writer.writerow(["Precision"] + [round(stds[0][i], 4) for i in range(len(classes))])
-			csv_writer.writerow(["Recall"] + [round(stds[1][i], 4) for i in range(len(classes))])
-			csv_writer.writerow(["F-score"] + [round(stds[2][i], 4) for i in range(len(classes))])
-			csv_writer.writerow(["Macro F1 Score", round(macro_std, 4)])
-
-			csv_writer.writerow(["\n"])
-			csv_writer.writerow([""] + [c for c in classes])  
-			for i in range(len(results["conf_mat"])):	
-				csv_writer.writerow([classes[i]] + conf_mean[i].tolist())
-	else:
-		print(means)
-
-def write_per_fold(fold, file_name, results, classes, total_conf_mat, report_stack, macro_f1_stack):
-	total_conf_mat = np.add(total_conf_mat, results["conf_mat"])
-		
-
-	for i, metric in enumerate(["precision", "recall", "f1-score"]):
-		for j, c in enumerate(classes):
-			report_stack[fold][i][j] = results["report"][c][metric]
-
-	# auc_stack.append(auc_score)
-	macro_f1_stack.append(results["macro_f1"])
-
-	return total_conf_mat, report_stack, macro_f1_stack 
 
 def train(classes, train_dataloader, test_dataloader, params, model):
 	device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -548,7 +449,7 @@ def main():
 
 		results = train(classes, train_dataloader, test_dataloader, params, model)
 
-		total_conf_mat, report_stack, macro_f1_stack = write_per_fold(fold, file_name, results, classes,
+		total_conf_mat, report_stack, macro_f1_stack = fmm.write_per_fold(fold, file_name, results, classes,
 																	  total_conf_mat, report_stack, macro_f1_stack)
 		# fig = plt.figure()
 		# plt.plot(list(range(params["num_epochs"])), val_loss)
@@ -558,7 +459,7 @@ def main():
 		break
 	
 	stacks = {"report_stack": report_stack, "macro_f1_stack": macro_f1_stack, "conf_mat_stack": total_conf_mat}
-	write_averages(file_name, results, stacks, n_folds, classes)
+	fmm.write_averages(file_name, results, stacks, n_folds, classes)
 
 if __name__ == "__main__":
 	main()
