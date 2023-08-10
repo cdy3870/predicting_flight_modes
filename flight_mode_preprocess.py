@@ -1,7 +1,6 @@
 import UAV as uav
 import pandas as pd
 import os
-import json
 from collections import Counter
 import numpy as np
 from sklearn.preprocessing import StandardScaler
@@ -14,44 +13,40 @@ import utils
 
 ulog_folder = "../../../../../../../work/uav-ml/px4-Ulog-Parsers/dataDownloaded"
 ulog_folder_hex = "../../../../../../../work/uav-ml/px4-Ulog-Parsers/dataDownloadedHex"
-json_file = "../../../../../../../work/uav-ml/px4-Ulog-Parsers/MetaLogs.json"
 
+indexable_meta = utils.get_indexable_meta()
 
-def get_indexable_meta(meta_json):
-	indexable_meta = {}
+def get_filtered_ids(drone_type="Quadrotor"):
+    '''
+    Get only a specific drone_type
 
-	for m in meta_json:
-		temp_id = m["id"]
-		m.pop("id")
-		indexable_meta[temp_id] = m
-		
-	return indexable_meta
-
-with open(json_file, 'r') as inputFile:
-	meta_json = json.load(inputFile)
-indexable_meta = get_indexable_meta(meta_json)
-	
-
-def get_filtered_ids():
+    Returns:
+        filtered_ids (list) :  list of ulog ids
+    '''
 
 	ulogs_downloaded = os.listdir(ulog_folder)
-	# ulogs_downloaded_hex = os.listdir(ulog_folder_hex)
-
-
-	# ulogs_downloaded = ulogs_downloaded_hex + ulogs_downloaded 
-
-
 	drone_ids = [u[:-4] for u in ulogs_downloaded]
 
 	filtered_ids = [u for u in drone_ids if indexable_meta[u]["duration"] != "0:00:00"]
-	filtered_ids = [u for u in drone_ids if indexable_meta[u]["type"] == "Quadrotor"]
+	filtered_ids = [u for u in drone_ids if indexable_meta[u]["type"] == drone_type]
 
 	distribution = [indexable_meta[u]["type"] for u in filtered_ids]
-	print(Counter(distribution))
 			
 	return filtered_ids
 
 def split_data(df, feat_name):
+    '''
+    Splits the raw data according to each timestamp's assigned mode for a specific feature
+
+    Parameters:
+        df (pd.DataFrame) : dataframe of unsplit mode labeled data 
+        feat_name (string) : the feature of interest
+        
+    Returns:
+        log_X (list) : mode separated flight
+        log_y (list) : corresponding mode labels
+    '''
+
 	current_index = 0
 	prev_value = df["mode"].iloc[0]
 	prev_index = 0
@@ -73,6 +68,18 @@ def split_data(df, feat_name):
 	return log_X, log_y
 
 def extract_dfs(mUAV, table_name, feat_name):
+    '''
+	Extracts dataframes from raw px4 data and groups them according to feature 
+
+    Parameters:
+        mUAV (object) : ulog parsing and mode separator object
+        table_name (string) : the ulog topic
+        feat_name (string) : the corresponding feature
+        
+    Returns:
+        df (pd.DataFrame) : parsed ulog data
+    '''
+
 	data = mUAV.get_desired_feats(table_name, feat_name)
 	modes = mUAV.modes_nearest_indices(table_name)
 	timestamps = mUAV.get_time_stamp(table_name)
@@ -87,25 +94,9 @@ def extract_dfs(mUAV, table_name, feat_name):
 	return df
 
 def generate_data(feats):
-	# Only ids that are quad and contain all the features
-	# with open("../../../../UAV_ML/full_parsed_7_multi.txt", "rb") as f:
-	# 	full_parsed_split = dp.split_features(pickle.load(f))
-	# 	temp_ids = list(full_parsed_split.keys())
-	# ids = [u for u in temp_ids if indexable_meta[u]["type"] == "Quadrotor"]
-	# print(f"subset size: {len(ids)}")
-
 	# Only ids that are quad
 	ids = get_filtered_ids()
 	ids = [u for u in ids if indexable_meta[u]["type"] == "Quadrotor"]
-
-	# Only ids that are quad and are the extra ids
-	# with open("new_mapped_X_xyz_extra.txt", "rb") as f:
-	# 	X_extra = pickle.load(f)	
-	# with open("extra_ids.txt", "rb") as f:
-	# 	extra_ids = pickle.load(f)
-	# print(len(extra_ids))
-	# ids = [value for value in extra_ids if len(X_extra[value]) > 0]
-
 
 	X = []
 	y = []
@@ -360,5 +351,8 @@ def standardize_data(X_train, X_test):
 	return X_train, X_test
 
 
+def main():
+	print(indexable_meta.keys())
 
-
+if __name__ == "__main__":
+	main()
